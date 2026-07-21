@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Panel Workspace</title>
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("panel-workspace-theme") || "dark";
+      try {
+        const uiState = JSON.parse(localStorage.getItem("panel-workspace-ui-v1")) || {};
+        document.documentElement.classList.toggle("sidebar-collapsed", Boolean(uiState.sidebarCollapsed));
+        document.documentElement.classList.toggle("controls-collapsed", Boolean(uiState.controlsCollapsed));
+      } catch {
+        // Ignore corrupt UI state and render the full workspace.
+      }
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="workspace-sidebar">
+        <div class="brand">
+          <div class="brand-mark">PW</div>
+          <div>
+            <h1>Panel Workspace</h1>
+            <p>Embedded browser dashboard</p>
+          </div>
+        </div>
+
+        <section id="workspacesSection" class="sidebar-section">
+          <div class="section-title">Workspaces</div>
+          <button class="workspace-item active" data-workspace="social-monitor">
+            <span>Social Monitor</span>
+            <strong data-workspace-count="social-monitor">10 panels</strong>
+          </button>
+        </section>
+
+        <section class="sidebar-section">
+          <div class="section-title">Browser Filters</div>
+          <label class="check-row"><input type="checkbox" value="chrome" checked /> Chrome</label>
+          <label class="check-row"><input type="checkbox" value="firefox" checked /> Firefox</label>
+          <label class="check-row"><input type="checkbox" value="duckduckgo" checked /> DuckDuckGo</label>
+          <label class="check-row"><input type="checkbox" value="edge" checked /> Edge</label>
+        </section>
+
+        <section class="sidebar-section architecture-note">
+          <div class="section-title">Engine</div>
+          <p>Panels are embedded Chromium views owned by this app. Native Chrome, Firefox, and Edge executables cannot be embedded as managed child tabs cross-platform, so browser names here map to isolated in-app profiles.</p>
+        </section>
+      </aside>
+
+      <main class="main-area">
+        <div class="control-panel">
+          <div class="workspace-chrome">
+            <button id="toggleSidebar" class="chrome-toggle" title="Hide sidebar" aria-label="Hide sidebar" aria-pressed="false">☰</button>
+            <button id="toggleControls" class="chrome-toggle" title="Hide control panel" aria-label="Hide control panel" aria-pressed="false">⌃</button>
+          </div>
+
+          <header class="toolbar">
+            <div class="toolbar-group action-controls">
+              <button id="launchWorkspace" class="primary">Start All</button>
+              <button id="launchSelected">Reload Selected</button>
+              <button id="closeAll">Close All</button>
+              <button id="refreshAll">Refresh All</button>
+              <button id="deleteSelected" class="danger" disabled>Delete Selected</button>
+            </div>
+            <div class="toolbar-group tab-controls">
+              <label>Tabs <input id="tabCountInput" type="number" min="1" step="1" value="10" /></label>
+              <label>Mode
+                <select id="tabCreateMode">
+                  <option value="append">Append</option>
+                  <option value="replace">Replace</option>
+                </select>
+              </label>
+              <button id="createTabs" class="primary">Create Tabs</button>
+              <button id="fullscreenDashboard">Fullscreen</button>
+              <button id="themeToggle">Light Mode</button>
+            </div>
+            <div class="toolbar-group layout-controls">
+              <label class="toggle-row"><input id="autoFitLayout" type="checkbox" checked /> Auto Arrange</label>
+              <label class="toggle-row"><input id="mobileViewport" type="checkbox" checked /> Compact View</label>
+              <label>Rows <input id="rowsInput" type="number" min="1" value="2" /></label>
+              <label>Columns <input id="columnsInput" type="number" min="1" value="5" /></label>
+              <label>Scale <input id="panelScale" type="range" min="55" max="240" value="100" /></label>
+              <button id="saveLayout">Save Layout</button>
+              <button id="loadLayout">Load Layout</button>
+            </div>
+          </header>
+
+          <section class="url-editor">
+            <label>
+              Browser
+              <select id="browserSelect">
+                <option value="chrome">Chrome</option>
+                <option value="firefox">Firefox</option>
+                <option value="duckduckgo">DuckDuckGo</option>
+                <option value="edge">Edge</option>
+              </select>
+            </label>
+            <label class="url-field">
+              Startup URL
+              <input id="startupUrl" type="url" value="https://www.instagram.com/" />
+            </label>
+            <button id="applyUrl">Apply To Selected Open Tabs</button>
+            <span id="statusText" class="status-text">Ready</span>
+          </section>
+        </div>
+
+        <section class="dashboard-wrap">
+          <button id="exitFullscreen" class="exit-fullscreen">Exit Fullscreen</button>
+          <div id="dashboardGrid" class="dashboard-grid" aria-label="Embedded browser panel grid"></div>
+        </section>
+      </main>
+
+      <div class="focus-toggle-dock" aria-label="Focus mode controls">
+        <button id="restoreSidebar" class="focus-toggle" title="Show sidebar" aria-label="Show sidebar">☰</button>
+        <button id="restoreControls" class="focus-toggle" title="Show control panel" aria-label="Show control panel">⌄</button>
+      </div>
+    </div>
+
+    <!-- Global Control floating widget -->
+    <div id="gcShell" class="gc-shell" aria-label="Global Control floating widget">
+      <!-- The expanded card panel — floats above the pill -->
+      <section id="globalControlCenter" class="global-control-center" aria-label="Global Control Center" aria-hidden="true">
+        <div class="gc-card-header">
+          <div class="gc-card-title">
+            <span class="gc-card-icon">⚙</span>
+            <strong>Global Control</strong>
+          </div>
+          <div class="gc-card-meta">
+            <span id="globalPositionText" class="gc-position-badge">50%, 50%</span>
+            <button id="gcCollapseBtn" class="gc-collapse-btn" title="Collapse" aria-label="Collapse Global Control">✕</button>
+          </div>
+        </div>
+
+        <section class="gc-target-panel" aria-label="Visual Click Target">
+          <label class="toggle-row gc-hover-row">
+            <input id="hoverTargetMode" type="checkbox" />
+            <span>Hover Target Mode</span>
+          </label>
+          <div class="gc-click-fields">
+            <label>Click X <input id="gcClickX" type="number" min="0" value="0" readonly /></label>
+            <label>Click Y <input id="gcClickY" type="number" min="0" value="0" readonly /></label>
+            <button id="gcRunClick" class="primary" title="Run click at the stored target position">Run Click</button>
+          </div>
+        </section>
+
+        <div class="gc-actions">
+          <button id="globalScrollUp" title="Scroll Up">▲ Up</button>
+          <button id="globalScrollDown" title="Scroll Down">▼ Down</button>
+        </div>
+        <div class="gc-actions">
+          <button id="globalDoubleClick">Double Click</button>
+          <button id="globalStop">Stop</button>
+        </div>
+        <div class="gc-reset-group" aria-label="Global Controller reset actions">
+          <button id="gcResetCoordinates" class="gc-reset-button" title="Clear click coordinates and hide the visual target">
+            <span class="gc-reset-icon" aria-hidden="true">⌖</span>
+            <span>Reset Coordinates</span>
+          </button>
+          <button id="gcResetAutomation" class="gc-reset-button" title="Reset automation settings while keeping the click target">
+            <span class="gc-reset-icon" aria-hidden="true">↺</span>
+            <span>Reset Automation</span>
+          </button>
+          <button id="gcResetAll" class="gc-reset-button danger" title="Restore Global Controller defaults">
+            <span class="gc-reset-icon" aria-hidden="true">⟲</span>
+            <span>Reset All GC</span>
+          </button>
+        </div>
+
+        <div class="gc-separator"></div>
+
+        <div class="gc-modes">
+          <label class="gc-mode-toggle" title="Auto-repeat the last action">
+            <input id="gcAutoMode" type="checkbox" />
+            <span class="gc-mode-icon">⟳</span> Auto
+          </label>
+          <label class="gc-mode-toggle" title="Repeat action N times">
+            <input id="gcRepeatMode" type="checkbox" />
+            <span class="gc-mode-icon">↻</span> Repeat
+          </label>
+          <label class="gc-mode-toggle" title="Execute on all panels simultaneously">
+            <input id="gcConcurrencyMode" type="checkbox" checked />
+            <span class="gc-mode-icon">⫘</span> Concurrent
+          </label>
+        </div>
+
+        <div class="gc-repeat-config hidden" id="gcRepeatConfig">
+          <label>Count <input id="gcRepeatCount" type="number" min="1" max="999" value="5" /></label>
+          <label>Delay <input id="gcRepeatDelay" type="number" min="100" max="30000" value="2000" step="100" /> ms</label>
+        </div>
+        <div class="gc-auto-config hidden" id="gcAutoConfig">
+          <label>Interval <input id="gcAutoInterval" type="number" min="200" max="30000" value="2000" step="100" /> ms</label>
+        </div>
+
+        <div class="gc-separator"></div>
+
+        <section class="auto-click-panel" aria-label="Auto Click">
+          <div class="auto-click-header">
+            <div>
+              <strong>Auto Click</strong>
+              <span id="autoClickTargetHint">No target selected</span>
+            </div>
+            <span id="autoClickState" class="automation-state idle">Idle</span>
+          </div>
+
+          <label class="auto-click-field">
+            Target
+            <select id="autoClickTarget">
+              <option value="pointer">Current pointer</option>
+            </select>
+          </label>
+
+          <div class="auto-click-actions">
+            <button id="detectElements" title="Detect interactive elements">Detect</button>
+            <button id="saveManualTarget" title="Save current pointer as a reusable target">Save</button>
+            <button id="runAutoClick" class="primary" title="Review and run auto click">Run</button>
+          </div>
+
+          <div id="detectedElementList" class="detected-element-list" aria-live="polite"></div>
+
+          <div class="automation-progress">
+            <div class="automation-progress-bar"><span id="autoClickProgressBar"></span></div>
+            <span id="autoClickProgressText">0 / 0</span>
+          </div>
+
+          <div id="automationSummary" class="automation-summary">
+            <span>Success 0</span>
+            <span>Failed 0</span>
+            <span>Skipped 0</span>
+          </div>
+
+          <p id="autoClickError" class="auto-click-error" role="alert"></p>
+        </section>
+      </section>
+
+      <!-- The draggable pill trigger -->
+      <button id="globalControlToggle" class="gc-pill" title="Global Control Center" aria-label="Show Global Control Center" aria-expanded="false">
+        <span class="gc-pill-dots" aria-hidden="true">⠿</span>
+        <span class="gc-pill-icon" aria-hidden="true">⚙</span>
+        <span class="gc-pill-label">GC</span>
+      </button>
+
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

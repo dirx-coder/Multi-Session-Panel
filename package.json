@@ -1,0 +1,31 @@
+{
+  "name": "multi-session-panel",
+  "version": "1.0.0",
+  "description": "Desktop workspace manager with embedded browser panels.",
+  "main": "src/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dirx-coder/Multi-Session-Panel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dirx-coder/Multi-Session-Panel/issues"
+  },
+  "homepage": "https://github.com/dirx-coder/Multi-Session-Panel#readme",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/app.js && node --check src/userAgentManager.js"
+  },
+  "dependencies": {
+    "electron": "^43.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
+  }
+}
