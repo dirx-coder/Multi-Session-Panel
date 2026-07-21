@@ -1,4 +1,8 @@
-# Multi Session Panel
+<p align="center">
+  <img src="assets/logo.svg" alt="Multi-Session-Panel logo" width="112" />
+</p>
+
+# Multi-Session-Panel
 
 > A professional desktop automation platform for managing multiple embedded browser panels — with a clean dashboard interface and a modern floating Global Control system.
 

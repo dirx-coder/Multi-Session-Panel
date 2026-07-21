@@ -1,12 +1,13 @@
-# Panel Workspace v1.0 Release Checklist
+# Multi-Session-Panel v1.0 Release Checklist
 
 ## Project Overview
 
-Panel Workspace is an Electron desktop application for managing multiple embedded browser panels in a phone-style grid. It provides workspace persistence, isolated in-app browser sessions, layout controls, and a floating Global Controller for coordinated click, scroll, repeat, and auto-click workflows.
+Multi-Session-Panel is an Electron desktop application for managing multiple embedded browser panels in a phone-style grid. It provides workspace persistence, isolated in-app browser sessions, layout controls, and a floating Global Controller for coordinated click, scroll, repeat, and auto-click workflows.
 
 ## Version Information
 
 - Release: `v1.0.0`
+- Product name: `Multi-Session-Panel`
 - Package name: `multi-session-panel`
 - Runtime: Electron
 - Main entry: `src/main.js`

@@ -1,5 +1,6 @@
 {
   "name": "multi-session-panel",
+  "productName": "Multi-Session-Panel",
   "version": "1.0.0",
   "description": "Desktop workspace manager with embedded browser panels.",
   "main": "src/main.js",

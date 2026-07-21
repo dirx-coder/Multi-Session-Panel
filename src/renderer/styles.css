@@ -188,15 +188,10 @@ select:focus {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: white;
-  font-size: 13px;
-  font-weight: 800;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
   flex-shrink: 0;
 }
 

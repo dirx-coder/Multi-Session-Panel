@@ -21,7 +21,7 @@ function createWindow() {
     height: 980,
     minWidth: 1180,
     minHeight: 720,
-    title: "Panel Workspace",
+    title: "Multi-Session-Panel",
     backgroundColor: "#0b0f14",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
