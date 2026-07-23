@@ -3,11 +3,16 @@ const path = require("path");
 const fs = require("fs");
 const { UserAgentManager } = require("./userAgentManager");
 
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+
 let mainWindow;
 const views = new Map();
 const sessionMetadata = new Map();
 const viewSessionMetadata = new WeakMap();
 const configuredPartitionUserAgents = new Map();
+const viewBounds = new Map();
 let lastClosedSession = [];
 const userDataPath = path.join(__dirname, "..", ".panel-data");
 const userAgentManager = new UserAgentManager();
@@ -34,7 +39,9 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
   mainWindow.on("resize", () => {
-    mainWindow.webContents.send("window:layout-invalidated");
+    if (!mainWindow?.webContents.isDestroyed()) {
+      mainWindow.webContents.send("window:layout-invalidated");
+    }
   });
 
   mainWindow.on("closed", () => {
@@ -114,7 +121,11 @@ function getSessionMetadata(view) {
 
 function loadPanelUrl(view, url) {
   const metadata = getSessionMetadata(view);
-  view.webContents.loadURL(url, metadata ? { userAgent: metadata.userAgent } : undefined);
+  if (view.webContents.isDestroyed()) return;
+  view.webContents.loadURL(url, metadata ? { userAgent: metadata.userAgent } : undefined)
+    .catch(() => {
+      // Navigation errors are surfaced through did-fail-load when the view is alive.
+    });
 }
 
 function wireViewEvents(id, view) {
@@ -146,6 +157,7 @@ function removeView(id) {
   mainWindow.removeBrowserView(view);
   if (!view.webContents.isDestroyed()) view.webContents.destroy();
   views.delete(id);
+  viewBounds.delete(id);
   if (metadata?.partition) userAgentManager.release(metadata.partition);
   sessionMetadata.delete(id);
   viewEmulationSize.delete(id);
@@ -154,7 +166,12 @@ function removeView(id) {
 
 function setHidden(id) {
   const view = views.get(id);
-  if (view) view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 });
+  if (!view) return;
+  const hiddenBounds = { x: -10000, y: -10000, width: 1, height: 1 };
+  const last = viewBounds.get(id);
+  if (sameBounds(last, hiddenBounds)) return;
+  view.setBounds(hiddenBounds);
+  viewBounds.set(id, hiddenBounds);
 }
 
 /* ── Mobile Viewport Emulation ─────────────────────────────────────────────
@@ -216,12 +233,17 @@ ipcMain.handle("workspace:mount-visible", (_event, panels) => {
     const physW = Math.round(panel.bounds.width);
     const physH = Math.round(panel.bounds.height);
 
-    view.setBounds({
+    const nextBounds = {
       x: Math.round(panel.bounds.x),
       y: Math.round(panel.bounds.y),
       width: physW,
       height: physH
-    });
+    };
+    const lastBounds = viewBounds.get(panel.id);
+    if (!sameBounds(lastBounds, nextBounds)) {
+      view.setBounds(nextBounds);
+      viewBounds.set(panel.id, nextBounds);
+    }
     view.setAutoResize({ width: false, height: false });
 
     if (panel.mobileViewport) {
@@ -238,6 +260,10 @@ ipcMain.handle("workspace:mount-visible", (_event, panels) => {
     if (!visibleIds.has(id)) setHidden(id);
   }
 });
+
+function sameBounds(a, b) {
+  return Boolean(a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
+}
 
 
 ipcMain.handle("workspace:launch", (_event, panels) => {

@@ -51,6 +51,10 @@ let globalControlState = createDefaultGlobalControlState();
 let gcScrollIndex = 0; // round-robin pointer for sequential scroll
 let automationRunId = 0;
 let globalControllerResetId = 0;
+let resizeState = null;
+const PHONE_BASE_WIDTH = 280;
+const PHONE_BASE_HEIGHT = 525;
+const PHONE_ASPECT_RATIO = PHONE_BASE_WIDTH / PHONE_BASE_HEIGHT;
 let automationState = {
   status: "idle",
   detected: [],
@@ -68,6 +72,8 @@ const columnsInput = document.getElementById("columnsInput");
 const panelScale = document.getElementById("panelScale");
 const autoFitLayout = document.getElementById("autoFitLayout");
 const mobileViewport = document.getElementById("mobileViewport");
+const stretchMode = document.getElementById("stretchMode");
+const freeResizeMode = document.getElementById("freeResizeMode");
 const browserSelect = document.getElementById("browserSelect");
 const startupUrl = document.getElementById("startupUrl");
 const statusText = document.getElementById("statusText");
@@ -138,7 +144,8 @@ function createPanel(browser, name, url, index) {
     currentUrl: url,
     order: index,
     status: "idle",
-    selected: false
+    selected: false,
+    customSize: null
   };
 }
 
@@ -191,6 +198,8 @@ function normalizeState(nextState) {
   Object.values(nextState.workspaces).forEach((workspace) => {
     workspace.autoFit ??= true;
     workspace.mobileViewport ??= true;
+    workspace.stretchMode ??= false;
+    workspace.freeResizeMode ??= false;
     workspace.rows ??= 2;
     workspace.columns ??= 5;
     workspace.scale ??= 100;
@@ -198,6 +207,7 @@ function normalizeState(nextState) {
       panel.order ??= index;
       panel.profile ||= `${panel.browser}-${index + 1}`;
       panel.mobileViewport = workspace.mobileViewport;
+      panel.customSize ??= null;
     });
   });
   nextState.savedLayouts ||= {};
@@ -347,6 +357,9 @@ function renderControls() {
   panelScale.value = workspace.scale;
   autoFitLayout.checked = workspace.autoFit;
   mobileViewport.checked = workspace.mobileViewport;
+  stretchMode.checked = Boolean(workspace.stretchMode);
+  freeResizeMode.checked = Boolean(workspace.freeResizeMode);
+  freeResizeMode.disabled = !workspace.stretchMode;
   rowsInput.disabled = workspace.autoFit;
   columnsInput.disabled = false;
   const selectedBrowser = browserSelect.value;
@@ -360,8 +373,6 @@ function renderGrid() {
   pruneSelection();
   const layout = resolveLayout(workspace, panels.length);
   const isDashboardFullscreen = document.fullscreenElement === document.documentElement || isDashboardMaximized;
-  const panelHeight = Math.round(525 * (workspace.scale / 100));
-  const panelWidth = Math.round(280 * (workspace.scale / 100));
   workspace.rows = layout.rows;
   workspace.columns = layout.columns;
   panels.forEach((panel) => {
@@ -370,22 +381,23 @@ function renderGrid() {
 
   document.body.classList.toggle("dashboard-fullscreen", document.fullscreenElement === document.documentElement);
   document.body.classList.toggle("dashboard-maximized", isDashboardMaximized);
-  grid.style.setProperty("--columns", layout.columns);
-  grid.style.setProperty("--rows", layout.rows);
-  grid.style.setProperty("--panel-width", `${panelWidth}px`);
-  grid.style.setProperty("--panel-height", `${panelHeight}px`);
+  updateGridMetrics(workspace, layout);
   rowsInput.value = layout.rows;
   columnsInput.value = layout.columns;
   grid.classList.toggle("fullscreen-active", Boolean(maximizedPanelId));
   grid.classList.toggle("dashboard-fullscreen-grid", isDashboardFullscreen);
+  grid.classList.toggle("stretch-grid", Boolean(workspace.stretchMode));
   grid.innerHTML = "";
 
   panels.forEach((panel) => {
     const article = document.createElement("article");
     article.className = `browser-panel ${selectedPanelIds.has(panel.id) ? "selected" : ""}`;
+    article.classList.toggle("stretch-enabled", Boolean(workspace.stretchMode));
+    article.classList.toggle("free-resize", Boolean(workspace.stretchMode && workspace.freeResizeMode));
     article.draggable = true;
     article.dataset.panelId = panel.id;
     article.dataset.browser = panel.browser ?? "";
+    applyPanelSizeStyles(article, panel, workspace);
     const isFullscreen = maximizedPanelId === panel.id;
     if (isFullscreen) {
       article.classList.add("fullscreen-panel");
@@ -403,16 +415,23 @@ function renderGrid() {
           <span></span>
         </label>
         <span class="status-dot ${statusClass}" aria-hidden="true"></span>
+        <span class="browser-icon ${escapeHtml(panel.browser)}" aria-hidden="true"></span>
         <span class="panel-name" title="${escapeHtml(panel.title || panel.name)}">${escapeHtml(panel.name)}</span>
         <span class="panel-browser-badge" aria-hidden="true">${browserTag}</span>
       </div>
-      <div class="view-slot" data-slot-id="${panel.id}">
-        <div class="view-placeholder">
-          <span class="placeholder-label">${escapeHtml(panel.name)}</span>
-          <span class="placeholder-url">${escapeHtml(panel.url)}</span>
+      <div class="device-frame" aria-hidden="true"></div>
+      <div class="device-speaker" aria-hidden="true"></div>
+      <div class="device-camera" aria-hidden="true"></div>
+      <div class="device-screen">
+        <div class="view-slot" data-slot-id="${panel.id}">
+          <div class="view-placeholder">
+            <span class="placeholder-label">${escapeHtml(panel.name)}</span>
+            <span class="placeholder-url">${escapeHtml(panel.url)}</span>
+          </div>
+          <div class="automation-highlight-layer" data-automation-layer="${panel.id}"></div>
         </div>
-        <div class="automation-highlight-layer" data-automation-layer="${panel.id}"></div>
       </div>
+      <button class="phone-resize-handle" data-resize-panel="${panel.id}" type="button" title="Resize phone" aria-label="Resize ${escapeHtml(panel.name)}"></button>
     `;
 
     grid.appendChild(article);
@@ -424,6 +443,32 @@ function renderGrid() {
   queueLayoutSync();
   positionTargetMarker();
   persist();
+}
+
+function updateGridMetrics(workspace, layout = resolveLayout(workspace, visiblePanels().length)) {
+  const panelHeight = Math.round(PHONE_BASE_HEIGHT * (workspace.scale / 100));
+  const panelWidth = Math.round(PHONE_BASE_WIDTH * (workspace.scale / 100));
+  grid.style.setProperty("--columns", layout.columns);
+  grid.style.setProperty("--rows", layout.rows);
+  grid.style.setProperty("--panel-width", `${panelWidth}px`);
+  grid.style.setProperty("--panel-height", `${panelHeight}px`);
+}
+
+function scaledDefaultPhoneSize(workspace) {
+  return {
+    width: Math.round(PHONE_BASE_WIDTH * (workspace.scale / 100)),
+    height: Math.round(PHONE_BASE_HEIGHT * (workspace.scale / 100))
+  };
+}
+
+function applyPanelSizeStyles(article, panel, workspace) {
+  if (workspace.stretchMode && panel.customSize?.width && panel.customSize?.height) {
+    article.style.setProperty("--phone-width", `${Math.round(panel.customSize.width)}px`);
+    article.style.setProperty("--phone-height", `${Math.round(panel.customSize.height)}px`);
+  } else {
+    article.style.removeProperty("--phone-width");
+    article.style.removeProperty("--phone-height");
+  }
 }
 
 function resolveLayout(workspace, panelCount) {
@@ -459,7 +504,7 @@ function attachPanelHandlers() {
     });
 
     panelEl.addEventListener("dblclick", (event) => {
-      if (event.target.closest("input, label, select")) return;
+      if (event.target.closest("button, input, label, select")) return;
       maximizedPanelId = maximizedPanelId === panelEl.dataset.panelId ? null : panelEl.dataset.panelId;
       renderGrid();
     });
@@ -472,6 +517,71 @@ function attachPanelHandlers() {
       renderGrid();
     });
   });
+
+  document.querySelectorAll("[data-resize-panel]").forEach((handle) => {
+    handle.addEventListener("pointerdown", startPhoneResize);
+  });
+}
+
+function startPhoneResize(event) {
+  if (event.button !== 0) return;
+  const workspace = activeWorkspace();
+  if (!workspace.stretchMode) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const panelId = event.currentTarget.dataset.resizePanel;
+  const panel = workspace.panels.find((item) => item.id === panelId);
+  const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+  if (!panel || !panelEl) return;
+
+  const rect = panelEl.getBoundingClientRect();
+  resizeState = {
+    panelId,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startWidth: rect.width,
+    startHeight: rect.height,
+    freeResize: Boolean(workspace.freeResizeMode)
+  };
+  panelEl.classList.add("resizing");
+  panelEl.draggable = false;
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+}
+
+function updatePhoneResize(event) {
+  if (!resizeState) return;
+  event.preventDefault();
+
+  const workspace = activeWorkspace();
+  const panel = workspace.panels.find((item) => item.id === resizeState.panelId);
+  const panelEl = document.querySelector(`[data-panel-id="${resizeState.panelId}"]`);
+  if (!panel || !panelEl) return;
+
+  const minWidth = 190;
+  const maxWidth = 720;
+  const minHeight = 330;
+  const maxHeight = 1280;
+  const width = clamp(resizeState.startWidth + event.clientX - resizeState.startX, minWidth, maxWidth);
+  const height = resizeState.freeResize
+    ? clamp(resizeState.startHeight + event.clientY - resizeState.startY, minHeight, maxHeight)
+    : Math.round(width / PHONE_ASPECT_RATIO);
+
+  panel.customSize = { width: Math.round(width), height: Math.round(height) };
+  applyPanelSizeStyles(panelEl, panel, workspace);
+  queueLayoutSync();
+}
+
+function endPhoneResize(event) {
+  if (!resizeState) return;
+  const panelEl = document.querySelector(`[data-panel-id="${resizeState.panelId}"]`);
+  panelEl?.classList.remove("resizing");
+  if (panelEl) panelEl.draggable = true;
+  event.target.releasePointerCapture?.(resizeState.pointerId);
+  resizeState = null;
+  persist();
+  queueLayoutSync();
 }
 
 function clamp(value, min, max) {
@@ -502,6 +612,7 @@ function queueLayoutSync() {
 function syncEmbeddedBounds() {
   layoutRaf = null;
   const viewport = dashboardWrap.getBoundingClientRect();
+  const overlay = (globalControlState.visible ? gcShell : globalControlToggle).getBoundingClientRect();
   const panels = visiblePanels().map((panel) => {
     const slot = document.querySelector(`[data-slot-id="${panel.id}"]`);
     if (!slot) return null;
@@ -510,6 +621,7 @@ function syncEmbeddedBounds() {
     // Pass full slot bounds so the webview never resizes mid-scroll.
     const clipped = intersectRects(bounds, viewport);
     if (!clipped) return null;
+    if (rectsOverlap(bounds, overlay)) return null;
     return {
       ...panel,
       bounds: {
@@ -536,6 +648,10 @@ function intersectRects(rect, viewport) {
   return { x: left, y: top, width, height };
 }
 
+function rectsOverlap(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
 function setStatus(message) {
   statusText.textContent = message;
 }
@@ -557,6 +673,12 @@ async function createPhoneTabs() {
   const nextPanels = Array.from({ length: count }, (_value, index) =>
     createPanel(browser, `${browserLabel(browser)} ${startIndex + index + 1}`, url, startIndex + index)
   );
+  if (workspace.stretchMode) {
+    const defaultSize = scaledDefaultPhoneSize(workspace);
+    nextPanels.forEach((panel) => {
+      panel.customSize = { ...defaultSize };
+    });
+  }
 
   if (shouldReplace) {
     await Promise.all(previousPanels.map((panel) =>
@@ -620,6 +742,8 @@ function createWorkspace() {
     columns: 3,
     autoFit: true,
     mobileViewport: true,
+    stretchMode: false,
+    freeResizeMode: false,
     scale: 100,
     panels: []
   };
@@ -1269,20 +1393,37 @@ async function startRepeatMode(action) {
   setStatus(completed ? `Repeat complete (${count}×)` : "Repeat stopped");
 }
 
-function applyStartupUrl() {
+async function applyStartupUrl() {
   const browser = browserSelect.value;
   const url = normalizeUrl(startupUrl.value);
   const workspace = activeWorkspace();
   const targets = workspace.panels.filter((panel) => panel.browser === browser && (!selectedPanelIds.size || selectedPanelIds.has(panel.id)));
+  const applyButton = document.getElementById("applyUrl");
+
+  if (!targets.length) {
+    setStatus(`No ${browserLabel(browser)} tabs matched the current selection`);
+    return;
+  }
+
+  applyButton.disabled = true;
+  setStatus(`Updating ${targets.length} ${browserLabel(browser)} tab${targets.length === 1 ? "" : "s"}...`);
 
   for (const panel of targets) {
     panel.url = url;
     panel.currentUrl = url;
-    window.panelApi.panelCommand({ id: panel.id, command: "navigate", value: url, panel });
   }
 
-  setStatus(`Updated ${targets.length} ${browser} startup URL${targets.length === 1 ? "" : "s"}`);
-  renderGrid();
+  try {
+    await Promise.all(targets.map((panel) =>
+      window.panelApi.panelCommand({ id: panel.id, command: "navigate", value: url, panel })
+    ));
+    setStatus(`Updated ${targets.length} ${browserLabel(browser)} startup URL${targets.length === 1 ? "" : "s"}`);
+    persist();
+  } catch (error) {
+    setStatus(`URL update failed: ${error.message}`);
+  } finally {
+    applyButton.disabled = false;
+  }
 }
 
 function normalizeUrl(value) {
@@ -1399,8 +1540,10 @@ document.getElementById("saveLayout").addEventListener("click", () => {
     columns: workspace.columns,
     autoFit: workspace.autoFit,
     mobileViewport: workspace.mobileViewport,
+    stretchMode: workspace.stretchMode,
+    freeResizeMode: workspace.freeResizeMode,
     scale: workspace.scale,
-    order: workspace.panels.map((panel) => ({ id: panel.id, order: panel.order }))
+    order: workspace.panels.map((panel) => ({ id: panel.id, order: panel.order, customSize: panel.customSize }))
   };
   persist();
   setStatus("Layout saved");
@@ -1417,10 +1560,15 @@ document.getElementById("loadLayout").addEventListener("click", () => {
   workspace.columns = saved.columns;
   workspace.autoFit = saved.autoFit ?? workspace.autoFit;
   workspace.mobileViewport = saved.mobileViewport ?? workspace.mobileViewport;
+  workspace.stretchMode = saved.stretchMode ?? workspace.stretchMode;
+  workspace.freeResizeMode = saved.freeResizeMode ?? workspace.freeResizeMode;
   workspace.scale = saved.scale;
   saved.order.forEach((savedPanel) => {
     const panel = workspace.panels.find((item) => item.id === savedPanel.id);
-    if (panel) panel.order = savedPanel.order;
+    if (panel) {
+      panel.order = savedPanel.order;
+      panel.customSize = savedPanel.customSize ?? panel.customSize ?? null;
+    }
   });
   renderControls();
   renderGrid();
@@ -1440,8 +1588,11 @@ columnsInput.addEventListener("change", () => {
 });
 
 panelScale.addEventListener("input", () => {
-  activeWorkspace().scale = Math.max(55, Math.min(240, Number(panelScale.value) || 100));
-  renderGrid();
+  const workspace = activeWorkspace();
+  workspace.scale = Math.max(55, Math.min(240, Number(panelScale.value) || 100));
+  updateGridMetrics(workspace);
+  queueLayoutSync();
+  persist();
 });
 
 autoFitLayout.addEventListener("change", () => {
@@ -1461,6 +1612,33 @@ mobileViewport.addEventListener("change", () => {
   setStatus(mobileViewport.checked ? "Compact view enabled" : "Wide desktop view enabled");
 });
 
+stretchMode.addEventListener("change", () => {
+  const workspace = activeWorkspace();
+  workspace.stretchMode = stretchMode.checked;
+  if (!workspace.stretchMode) {
+    workspace.freeResizeMode = false;
+    workspace.panels.forEach((panel) => {
+      panel.customSize = null;
+    });
+  } else {
+    const defaultSize = scaledDefaultPhoneSize(workspace);
+    workspace.panels.forEach((panel) => {
+      panel.customSize ||= { ...defaultSize };
+    });
+  }
+  renderControls();
+  renderGrid();
+  setStatus(workspace.stretchMode ? "Stretch mode enabled" : "Stretch mode disabled");
+});
+
+freeResizeMode.addEventListener("change", () => {
+  const workspace = activeWorkspace();
+  workspace.freeResizeMode = freeResizeMode.checked;
+  renderControls();
+  renderGrid();
+  setStatus(workspace.freeResizeMode ? "Free resize enabled" : "Aspect ratio lock enabled");
+});
+
 browserSelect.addEventListener("change", renderControls);
 
 document.querySelectorAll(".check-row input").forEach((input) => {
@@ -1478,6 +1656,9 @@ window.addEventListener("resize", () => {
   queueLayoutSync();
   positionTargetMarker();
 });
+window.addEventListener("pointermove", updatePhoneResize);
+window.addEventListener("pointerup", endPhoneResize);
+window.addEventListener("pointercancel", endPhoneResize);
 dashboardWrap.addEventListener("scroll", () => {
   queueLayoutSync();
   positionTargetMarker();
@@ -1493,8 +1674,22 @@ window.panelApi.onPanelStatus((payload) => {
   if (payload.title) panel.title = payload.title;
   if (payload.url) panel.currentUrl = payload.url;
   panel.status = payload.loading ? "loading" : "live";
-  renderGrid();
+  updatePanelStatus(payload.id);
 });
+
+function updatePanelStatus(panelId) {
+  const panel = activeWorkspace().panels.find((item) => item.id === panelId);
+  const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+  if (!panel || !panelEl) return;
+  const dot = panelEl.querySelector(".status-dot");
+  const name = panelEl.querySelector(".panel-name");
+  if (dot) {
+    dot.classList.toggle("loading", panel.status === "loading");
+    dot.classList.toggle("live", panel.status === "live");
+  }
+  if (name) name.title = panel.title || panel.name;
+  persist();
+}
 
 document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "r") {
@@ -1632,6 +1827,7 @@ renderGrid();
     gcShell.style.top = `${top}px`;
     gcShell.style.right = "auto";
     gcShell.style.bottom = "auto";
+    queueLayoutSync();
   });
 
   dragHandle.addEventListener("pointerup", (event) => {
@@ -1642,6 +1838,7 @@ renderGrid();
     if (didDrag) {
       saveGcPosition();
       suppressNextClick = true;
+      queueLayoutSync();
     }
     didDrag = false;
   });
